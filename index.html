@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Enterprise Financial Performance & Fraud Analytics — Executive Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="dashboard_data.js"></script>
+<style>
+  :root{
+    --bg:#0b1120; --panel:#161f38; --ink:#e8eefc; --muted:#93a3c6; --line:#27324f;
+    --green:#34d399; --cyan:#38bdf8; --pink:#f472b6; --amber:#fbbf24; --red:#f87171; --violet:#a78bfa;
+    --grad:linear-gradient(120deg,#34d399,#38bdf8 60%,#a78bfa);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:var(--ink);
+    background:radial-gradient(1100px 700px at 10% -8%,rgba(52,211,153,.10),transparent 60%),
+      radial-gradient(900px 650px at 92% 4%,rgba(56,189,248,.09),transparent 55%),var(--bg);
+    padding:26px clamp(14px,4vw,44px) 60px;line-height:1.55}
+  h1{font-size:clamp(19px,2.7vw,26px);font-weight:800;letter-spacing:-.02em}
+  .sub{color:var(--muted);font-size:13px;margin-top:3px}
+  .tag{display:inline-block;font-size:11px;color:var(--green);border:1px solid var(--line);
+    border-radius:999px;padding:3px 10px;margin-left:8px;vertical-align:middle}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:22px 0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 18px}
+  .card .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .card .v{font-size:25px;font-weight:800;margin-top:4px}
+  .ai{background:linear-gradient(180deg,rgba(52,211,153,.08),rgba(56,189,248,.05));
+    border:1px solid var(--line);border-radius:18px;padding:20px 22px;margin-bottom:22px}
+  .ai h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .ai p{color:#dbe4fb;font-size:15px;margin-top:8px}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px 20px}
+  .panel h3{font-size:14px;margin-bottom:14px;font-weight:600}
+  canvas{max-height:280px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th,td{padding:7px 6px;border-bottom:1px solid var(--line);text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;font-weight:600}
+  .fraudbar{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+  .fraudbar .s{background:rgba(244,114,182,.08);border:1px solid var(--line);border-radius:12px;padding:12px 16px;flex:1;min-width:130px}
+  .fraudbar .s .n{font-size:22px;font-weight:800;color:var(--pink)}
+  .fraudbar .s .l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
+  .score{font-weight:700;color:var(--pink)}
+  .foot{color:var(--muted);font-size:12px;margin-top:24px;text-align:center}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <header>
+    <h1>Enterprise Financial Performance &amp; Fraud Analytics <span class="tag">CFO Platform</span></h1>
+    <div class="sub" id="sub">Revenue · margins · budget vs actual · cash flow · anomaly detection</div>
+  </header>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="ai"><h2>⚡ AI Executive Summary</h2><p id="aiText">—</p></section>
+
+  <section class="grid">
+    <div class="panel"><h3>Monthly revenue — actuals &amp; 6-month forecast ($M)</h3><canvas id="forecast"></canvas></div>
+    <div class="panel"><h3>Operating expense — actual vs budget by department</h3><canvas id="bva"></canvas></div>
+  </section>
+
+  <section class="grid">
+    <div class="panel"><h3>Revenue by region ($M)</h3><canvas id="region"></canvas></div>
+    <div class="panel"><h3>Accounts-receivable aging (open invoices)</h3><canvas id="aging"></canvas></div>
+  </section>
+
+  <section class="panel" style="margin-bottom:18px">
+    <h3>🔎 Fraud detection — Isolation Forest anomaly review queue</h3>
+    <div class="fraudbar" id="fraudStats"></div>
+    <table id="fraudTable"><thead><tr>
+      <th>Txn</th><th>Date</th><th>Dept</th><th>Vendor</th><th>Category</th><th>Amount</th><th>Anomaly&nbsp;score</th>
+    </tr></thead><tbody></tbody></table>
+  </section>
+
+  <div class="foot">Data is illustrative and generated deterministically. Built with Python (pandas, scikit-learn — IsolationForest) · SQL · Chart.js.</div>
+
+<script>
+const D = window.FIN_DATA;
+const M = n => "$" + (Number(n)/1e6).toFixed(1) + "M";
+const fmt = n => Number(n).toLocaleString(undefined,{maximumFractionDigits:0});
+const GR="#34d399", CY="#38bdf8", PK="#f472b6", AM="#fbbf24", VI="#a78bfa", RE="#f87171", MUT="#93a3c6", LINE="#27324f";
+Chart.defaults.color=MUT; Chart.defaults.font.family="-apple-system,Segoe UI,Roboto,sans-serif";
+
+document.getElementById("sub").textContent =
+  "Revenue · margins · budget vs actual · cash flow · anomaly detection · generated " + (D.generated_at||"").slice(0,10);
+document.getElementById("aiText").textContent = D.ai_summary;
+
+const k = D.kpi;
+const cards = [
+  ["Revenue", M(k.total_revenue), GR],
+  ["Gross margin", k.gross_margin_pct+"%", CY],
+  ["Operating expenses", M(k.operating_expenses), VI],
+  ["EBITDA", M(k.ebitda)+" · "+k.ebitda_margin_pct+"%", AM],
+  ["Operating cash flow", M(k.operating_cash_flow), "#e8eefc"],
+  ["DSO", k.dso_days+" d", PK],
+];
+document.getElementById("kpis").innerHTML = cards.map(([l,v,c])=>
+  `<div class="card"><div class="k">${l}</div><div class="v" style="color:${c}">${v}</div></div>`).join("");
+
+// Revenue forecast
+const h=D.forecast.history, f=D.forecast.forecast;
+const labels=h.map(x=>x.month).concat(f.map(x=>x.month));
+const actual=h.map(x=>x.revenue/1e6).concat(new Array(f.length).fill(null));
+const fore=new Array(h.length-1).fill(null).concat([h[h.length-1].revenue/1e6],f.map(x=>x.revenue/1e6));
+new Chart(forecast,{type:"line",data:{labels,datasets:[
+  {label:"Actual",data:actual,borderColor:CY,backgroundColor:CY,tension:.3,pointRadius:2,borderWidth:2},
+  {label:"Forecast",data:fore,borderColor:PK,borderDash:[6,4],tension:.3,pointRadius:2,borderWidth:2}]},
+  options:{plugins:{legend:{labels:{color:"#cbd5e1"}}},scales:{x:{grid:{color:LINE}},y:{grid:{color:LINE}}}}});
+
+// Budget vs actual
+const b=D.budget_vs_actual;
+new Chart(bva,{type:"bar",data:{labels:b.map(x=>x.department),datasets:[
+  {label:"Actual",data:b.map(x=>x.actual_opex/1e6),backgroundColor:CY},
+  {label:"Budget",data:b.map(x=>x.budget_opex/1e6),backgroundColor:"#3b466b"}]},
+  options:{plugins:{legend:{labels:{color:"#cbd5e1"}}},scales:{x:{grid:{display:false},ticks:{maxRotation:40}},
+    y:{grid:{color:LINE},title:{display:true,text:"$M (12-mo)",color:MUT}}}}});
+
+// Revenue by region
+const rr=D.revenue_by_region, regions=[...new Set(rr.map(x=>x.region))], months=[...new Set(rr.map(x=>x.month))];
+const rcol={Northeast:CY,Midwest:PK,South:GR,West:VI};
+new Chart(region,{type:"line",data:{labels:months,datasets:regions.map(rg=>({
+  label:rg,borderColor:rcol[rg]||AM,backgroundColor:rcol[rg]||AM,tension:.3,pointRadius:0,borderWidth:2,
+  data:months.map(m=>{const r=rr.find(x=>x.region===rg&&x.month===m);return r?r.revenue/1e6:null;})}))},
+  options:{plugins:{legend:{labels:{color:"#cbd5e1"}}},scales:{x:{grid:{color:LINE}},y:{grid:{color:LINE}}}}});
+
+// AR aging
+const ag=D.ar_aging;
+new Chart(aging,{type:"bar",data:{labels:ag.map(x=>x.bucket),datasets:[{label:"Open amount ($M)",
+  data:ag.map(x=>x.open_amount/1e6),backgroundColor:ag.map(x=>x.bucket==="90+"?RE:x.bucket==="61-90"?AM:CY)}]},
+  options:{plugins:{legend:{display:false}},scales:{x:{grid:{display:false}},y:{grid:{color:LINE},title:{display:true,text:"$M open",color:MUT}}}}});
+
+// Fraud
+const fr=D.fraud;
+document.getElementById("fraudStats").innerHTML = [
+  [fr.flagged_count, "transactions flagged"],
+  [M(fr.flagged_value), "value under review"],
+  [Math.round(fr.recall_vs_injected*100)+"%", "planted anomalies caught"],
+  [fr.precision_vs_injected, "precision (planted)"],
+].map(([n,l])=>`<div class="s"><div class="n">${n}</div><div class="l">${l}</div></div>`).join("");
+document.querySelector("#fraudTable tbody").innerHTML = fr.top.map(t=>`
+  <tr><td>${t.txn_id}</td><td>${t.date}</td><td>${t.dept_id}</td><td>${t.vendor}</td>
+  <td>${t.category}</td><td>$${fmt(t.amount)}</td><td class="score">${t.anomaly_score}</td></tr>`).join("");
+</script>
+</body>
+</html>
